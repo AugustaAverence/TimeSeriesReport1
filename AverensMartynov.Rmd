@@ -1,0 +1,247 @@
+---
+title: "Time Series Report 1"
+author: "Averence, Martynov"
+date: "24.09.2020"
+output: html_document
+---
+
+7 = Unemployment rate (urate)
+
+``` {r include = FALSE} 
+require(lmtest)
+require(zoo)
+require(xts)
+require(PerformanceAnalytics)
+require(forecast)
+require(Metrics)
+
+Macro <- read.csv("D:/AA_UNIVER/COURSE_4/TIME SERIES ANALYSIS/DATA/Quart.csv", header = TRUE, sep=";")
+M<-as.xts(Macro[,2:18], order.by = as.yearqtr(Macro[,1]))
+```
+
+First, let us look at summary, histogram, timeline plot and boxplot:
+``` {r} 
+summary(M$Unemp)
+hist(M$Unemp)
+plot.xts(M$Unemp)
+boxplot(Macro$Unemp)
+``` 
+
+The time series data representing unemployment rate is for every quarter from 1960 to 2013, with a minimum value of 3.4, maximum of 10.67 and mean of 6.082.
+The series is not stationary, hence it will be necessary to define a level of differencing while fitting ARIMA model. The boxplot shows an outlier higher the rate of 10. 
+
+
+
+# 2.
+Setting a sample size for training model, splitting the sample into train and test subsamples. Dividing as 75:25 :
+
+``` {r}
+M_train<-M$Unemp[1:156]
+M_test <- M$Unemp[157:212]
+```
+
+# 3.
+Fitting naive model to compare forecast with. Predicting with naive model for test subgroup.
+
+It is seen that the mean value of a naive model forecast lies just below rate of 5. 
+
+```{r}
+X <- naive(M_train,h=56)
+plot(X)
+```
+
+Counting RMSE (root-mean-square-error). RMSD is always non-negative, and a value of 0 (almost never achieved in practice) would indicate a perfect fit to the data. In general, a lower RMSD is better than a higher one:
+```{r warning  = FALSE}
+rmse(M_test$Unemp, X$mean)
+```
+
+It is necessary to look at the ACF and PACF plots for further fitting of ARIMA model, i.e. to find out the parameters p and q:
+
+```{r}
+chart.ACFplus(M_train)
+```
+
+
+And for a differenced series: 
+```{r}
+chart.ACFplus(diff(M_train))
+```
+
+
+We clearly see in the first pair of graphs that PACF shows the lag=2 as a significant one: it is our p parameter. Whereas ACF represents the situation when we should set MA with q = 1 as the lags slowly and gradually decline towards insignificant level shown by Student's coridor. 
+
+# 4.
+Fitting ARIMA with appropriate lag on train subsample:
+
+ARIMA(2,1,1):
+```{r}
+arma1<-Arima(M_train,order=c(2,1,1), fixed = c(0, NA, NA))
+arma1
+``` 
+
+ARIMA(1,1,1):
+```{r}
+arma2<-Arima(M_train,order=c(1,1,1), fixed = c(0, NA))
+arma2
+```
+
+ARIMA(2,1,2):
+```{r}
+arma3<-Arima(M_train,order=c(2,1,2), fixed = c(0, NA, NA, NA))
+arma3
+```
+
+Evidently, ARIMA(2,1,1) with the log-likelihood (the natural logarithm of the likelihood) = -9.71 (which should be maximum of all models), AIC=25.43 and BIC=34.56 (have to be minimum) is the best of all three.
+
+
+
+# 4. 
+ARIMA (2, 1, 1) has been chosen.
+
+
+#a.
+There is a necessity in explaining the choose of lags, checking the residuals and quality of the model. Let us build a beautiful plot for residuals checking:
+
+1) Graphical analysis shows that residuals are white noise and there is no autocorrelation, but Ljung-Box test within the same function shows p-value = 0.01975, when we are supposed to reject H0 (residuals are not randomly distributed):
+```{r}
+library(forecast)
+checkresiduals(arma1)
+``` 
+
+2) Checking tests of Ljung-Box and Box-Pierce separately, using a different function and testing up to 8th lag:
+```{r}
+Box.test(arma1$residuals, lag = 8, type = c("Box-Pierce")) 
+Box.test(arma1$residuals, lag = 8, type = c("Ljung-Box")) 
+```
+Both test show p-value>0.1, hence we do not reject H0: residuals of ARIMA(2,1,1) are white noise. 
+
+We also checked residuals for other models (just for making sure):
+```{r}
+checkresiduals(arma2)   
+checkresiduals(arma3)
+```
+graphical analysis doesn't show a clear image of that residuals were white noise. Hence, a Box.test function will help to find it out:
+```{r}
+Box.test(arma2$residuals, lag = 8, type = c("Box-Pierce"))
+Box.test(arma3$residuals, lag = 8, type = c("Box-Pierce")) 
+``` 
+
+It seems like only the model ARIMA(2,1,2) among the upper two has white noise residuals according to Box-Pierce test. And indeed ACF plot looks much better and more accurate than that of the first model (among the rejected ones). Anyway, we have chosen the very first ARIMA model, whereas the other two are rejected in this analysis. 
+
+# b.
+make forecast on test subsample, 
+predict after arima
+
+```{r}
+f1 <- forecast (arma1, h=56, level=90)
+autoplot(f1)
+```
+
+
+A forecast based on ARIMA(2,1,1) for the next 56 quarters shows a mean value of around 4.
+
+
+# c.
+calculate RMSE, MAPE on test subsample
+
+RMSE is counted as rmse(actual, predicted)
+
+```{r include = FALSE} 
+install.packages("Metrics")
+require("Metrics")
+```
+```{r warning = FALSE}
+rmse(M_test, f1$mean) 
+```
+RMSE for our ARIMA model is 2.754288, and later we will need to compare them with that of the next model of auto.arima(). RMSD is always non-negative, and a value of 0 (almost never achieved in practice) would indicate a perfect fit to the data. In general, a lower RMSD is better than a higher one.
+
+```{r warning = FALSE} 
+mape(M_test, f1$mean)
+```
+
+
+# d.
+
+Now we need to calculate U2 to compare with naive fitting on test subsample, and make a conclusion. We will need to put predicted variables in the command below in the right order which is TheilU(actual, predicted):
+```{r include = FALSE} 
+require(DescTools)
+```
+```{r warning = FALSE}
+TheilU(M_test, f1$mean, type=2)
+``` 
+If the U2 = 0.4268393, then it means the forecast is better than that of Naive Method with Naive modelling. As U2 = 1 if y(t) = y(t-1) is a naive forecast.
+
+
+# 5.
+Fitting auto.arima() on train subgroup and going through the algorithm 4a, 4b,4c,4d and comparing forecast with previous task 4. Which one is better and why? Figuring this out by building an auto.arima model which is made as ARIMA(4, 1, 0):
+```{r}
+fit <- auto.arima(M_train$Unemp, seasonal=FALSE) 
+plot(fit)
+```
+
+
+All the roots lie within a circle, there are no roots close to the unit circle that might be numerically unstable, hence the corresponding model is considered to be quite  good for forecasting.
+
+# Looking at the steps from 4(a-d)
+#a.	
+Let us explain the choose of lags, check the residuals and quality of the model:
+```{r}
+checkresiduals(fit)
+```
+Graphical analysis shows that residuals are similar to white noise but there is a significant lag = 8 (coming out of the coridor). Hence, there is a necessity to check two other tests: 
+
+```{r}
+Box.test(fit$residuals, lag = 8, type = c("Box-Pierce")) 
+Box.test(fit$residuals, lag = 8, type = c("Ljung-Box"))  
+```
+Both tests' p-value > 0.1, hence we do not reject H0, and residuals may be cosidered as white noise indeed.  
+
+CONCLUSION: residuals are white noise, no autocorrelation between residuals.
+
+# b.
+make forecast on test subsample, 
+predict after arima
+```{r}
+f2 <- forecast (fit, h=56, level=90)
+```
+Fan plot: 
+```{r}
+autoplot(f2)
+```
+
+
+The mean lies approximately at 4.3
+
+
+# c.
+calculate RMSE, MAPE on test subsample
+```{r warning = FALSE}
+rmse(M_test, f2$mean) 
+```
+
+```{r warning = FALSE}
+mape(M_test, f2$mean)
+```
+
+
+# d.
+
+calculate U2 to compare with naive fitting on test subsample, conclude
+put predicted variables in the command below in the right order
+```{r warning = FALSE}
+TheilU(M_test, f2$mean, type=2)
+```
+It is evident that U2 = 0.4096698 shows that auto.arima() worked better than the Naive method (<1): U2 = 1 if y(t) = y(t-1) (naive forecast).
+
+
+# Conclusion
+After comparison between two ARIMA models, the following conclusion can be made:
+Both models have white noise as residuals, but p-value of Box-Pierce and Ljung-Box tests for auto.arima model are higher
+
+RMSE: 2.754288 (manual) > 2.643497 (auto)
+
+MAPE: 0.2676828 (manual) > 0.2499615 (auto)
+
+U2: U2 = 0.4268393 (manual) > 0.4096698 (auto)
+
+Generally speaking, the auto.arima model shows better results according to the accuracy measures RMSE, MAPE and U2. Hence it is better for forecasting.
